@@ -7,11 +7,11 @@ from agents.execute_agent import ExecuteAgent
 from agents.stabilize_agent import StabilizeAgent
 from agents.simulate_agent import SimulateAgent
 
-
 def main():
     parser = argparse.ArgumentParser(description="AI SysAdmin Assistant CLI")
 
     parser.add_argument('--analyze', metavar='SCRIPT', help="Analyze a script or log file")
+    parser.add_argument('--gpt', action='store_true', help="(Optional) Use GPT for explanation with --analyze")
     parser.add_argument('--fix', metavar='SCRIPT', help="Propose a fix for a script")
     parser.add_argument('--execute', metavar='TASK', help="Execute a system task")
     parser.add_argument('--stabilize', action='store_true', help="Run stabilization checks")
@@ -21,7 +21,7 @@ def main():
 
     if args.analyze:
         agent = AnalyzeAgent()
-        result = agent.analyze_script(args.analyze)
+        result = agent.analyze_script(args.analyze, use_gpt=args.gpt)
         print(result)
 
     if args.fix:

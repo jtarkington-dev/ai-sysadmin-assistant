@@ -20,6 +20,12 @@ class ScriptParser:
         self.detect_path_traversal(lines)
         self.detect_tmpfile_race(lines)
         self.detect_unsafe_path_manipulation(lines) 
+        self.detect_eval_from_external_input(lines)
+        self.detect_sensitive_logging(lines)
+        self.detect_pid_file_race(lines)
+        self.detect_infinite_logging_loop(lines)
+        self.detect_world_writable_files(lines)
+
 
         return self.issues
 
@@ -127,6 +133,114 @@ class ScriptParser:
                         "code": line.strip(),
                         "description": "Current directory (.) is prioritized in PATH — potential security risk (PATH poisoning)"
                     })
+
+    def detect_eval_from_external_input(self, lines):
+        """
+        Detect risky patterns where external or file-sourced input is later passed into eval.
+        """
+        external_sources = set()
+        variable_assignments = {}
+
+        for idx, line in enumerate(lines):
+            # Track any variable assignment that reads from external source
+            if any(cmd in line for cmd in ["grep", "cat", "awk", "sed", "cut", "tail", "head"]) and "=" in line:
+                parts = line.split("=")
+                if len(parts) >= 2:
+                    var_name = parts[0].strip()
+                    external_sources.add(var_name)
+                    variable_assignments[var_name] = idx + 1  # Save the line where it was assigned
+
+        for idx, line in enumerate(lines):
+            if "eval" in line:
+                # See if eval is used with an externally sourced variable
+                for var in external_sources:
+                    if var in line:
+                        self.issues.append({
+                            "severity": "Critical",
+                            "type": "external_input_to_eval",
+                            "line_number": idx + 1,
+                            "code": line.strip(),
+                            "description": f"External input from variable '{var}' (assigned at line {variable_assignments[var]}) used inside eval — command injection risk."
+                        })
+                # If no match, still flag any dynamic eval even if variable unknown
+                if "$" in line:
+                    self.issues.append({
+                        "severity": "Warning",
+                        "type": "eval_usage",
+                        "line_number": idx + 1,
+                        "code": line.strip(),
+                        "description": "Use of eval detected with dynamic input — possible command injection risk."
+                    })
+
+    def detect_sensitive_logging(self, lines):
+        """
+        Detect unsafe logging of secrets, passwords, or sensitive information.
+        """
+        for idx, line in enumerate(lines):
+            if re.search(r'echo.*SECRET|echo.*PASSWORD|echo.*TOKEN', line, re.IGNORECASE):
+                self.issues.append({
+                    "severity": "High",
+                    "type": "sensitive_info_leak",
+                    "line_number": idx + 1,
+                    "code": line.strip(),
+                    "description": "Sensitive information echoed or logged — potential information leak."
+                })
+
+    def detect_pid_file_race(self, lines):
+        """
+        Detect unsafe PID handling that could lead to race conditions or security issues.
+        """
+        pid_detected = False
+        for idx, line in enumerate(lines):
+            if "pid_file=" in line or "/var/run/" in line:
+                pid_detected = True
+            if pid_detected and ("kill" in line or "rm" in line) and "$old_pid" in line:
+                self.issues.append({
+                    "severity": "Warning",
+                    "type": "pid_file_race_risk",
+                    "line_number": idx + 1,
+                    "code": line.strip(),
+                    "description": "Possible PID reuse race condition — process ID may have changed before action."
+                })
+
+    def detect_infinite_logging_loop(self, lines):
+        """
+        Detect infinite loops that involve continuous writing to logs (potential DoS attack).
+        """
+        inside_loop = False
+        for idx, line in enumerate(lines):
+            if "while true" in line:
+                inside_loop = True
+            if inside_loop and ("echo" in line or ">>" in line):
+                self.issues.append({
+                    "severity": "Warning",
+                    "type": "infinite_logging_risk",
+                    "line_number": idx + 1,
+                    "code": line.strip(),
+                    "description": "Infinite loop detected writing to file — potential denial of service."
+                })
+
+    def detect_world_writable_files(self, lines):
+        """
+        Detect world-writable file permissions set using chmod.
+        """
+        for idx, line in enumerate(lines):
+            if "chmod 666" in line or "chmod a+w" in line:
+                self.issues.append({
+                    "severity": "Warning",
+                    "type": "world_writable_file",
+                    "line_number": idx + 1,
+                    "code": line.strip(),
+                    "description": "World-writable file permissions detected — security risk."
+                })
+
+
+
+
+
+
+                        
+
 
 
 

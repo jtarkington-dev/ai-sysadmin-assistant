@@ -7,7 +7,7 @@ class AnalyzeAgent(Agent):
     def __init__(self):
         super().__init__(name="AnalyzeAgent", description="Analyzes scripts, logs, and configurations.")
 
-    def analyze_script(self, target):
+    def analyze_script(self, target, use_gpt=False):
         parser = ScriptParser()
         issues = parser.parse(target)
 
@@ -22,9 +22,7 @@ class AnalyzeAgent(Agent):
         report = "## Critical Findings\n" + "\n\n".join(findings)
 
         # ---- OPTIONAL: GPT Explanation ----
-        explain_with_gpt = True  # <--- TURN ON/OFF GPT EXPLANATIONS
-
-        if explain_with_gpt:
+        if use_gpt:
             gpt_explanations = []
             for issue in issues:
                 prompt = (
