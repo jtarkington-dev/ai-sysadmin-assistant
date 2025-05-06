@@ -20,14 +20,14 @@ def ask_gpt(prompt: str) -> str:
     }
     body = {
         "model": "openai/gpt-4-turbo",
-        "max_tokens": 500,
+        "max_tokens": 8192,
         "messages": [
             {"role": "user", "content": prompt}
         ]
     }
 
     try:
-        response = requests.post(api_url, headers=headers, json=body)
+        response = requests.post(api_url, headers=headers, json=body, timeout=20)
         response.raise_for_status()
         data = response.json()
         return data["choices"][0]["message"]["content"].strip()

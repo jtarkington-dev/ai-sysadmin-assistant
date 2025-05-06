@@ -1,6 +1,10 @@
 # assistant/main.py
 
 import argparse
+import sys
+import shutil
+import subprocess
+import pydoc
 from agents.analyze_agent import AnalyzeAgent
 from agents.fix_agent import FixAgent
 from agents.execute_agent import ExecuteAgent
@@ -19,10 +23,42 @@ def main():
 
     args = parser.parse_args()
 
+    def print_or_page(text):
+        try:
+            with open("last_analysis_output.log", "w", encoding="utf-8") as f:
+                f.write(text)
+            pydoc.pager(text)
+        except Exception as e:
+            print(f"Paging failed: {e}")
+            print(text)
+
+
     if args.analyze:
         agent = AnalyzeAgent()
         result = agent.analyze_script(args.analyze, use_gpt=args.gpt)
-        print(result)
+
+        if isinstance(result, str):
+            print_or_page(result)
+
+        elif isinstance(result, list):
+            output_lines = ["## Critical Findings"]
+            for issue in result:
+                output_lines.append(f"- [{issue['type']}] Line {issue['line_number']}: {issue['description']}")
+                output_lines.append(f"    Code: {issue['code']}\n")
+            full_output = "\n".join(output_lines)
+
+            if args.gpt and getattr(agent, 'last_behavior', None):
+                    with open("debug_behavior_dump.txt", "w", encoding="utf-8") as debug_file:
+                        debug_file.write(repr(agent.last_behavior))
+                    full_output += "\n\n## Predicted Behavior\n" + agent.last_behavior.strip()
+
+            print_or_page(full_output)
+        else:
+            print("Unexpected result format.")
+
+
+
+
 
     if args.fix:
         agent = FixAgent()
@@ -43,6 +79,7 @@ def main():
         agent = SimulateAgent()
         result = agent.start_simulation()
         print(result)
+
 
 if __name__ == "__main__":
     main()

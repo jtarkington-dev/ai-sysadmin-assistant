@@ -25,6 +25,11 @@ class ScriptParser:
         self.detect_pid_file_race(lines)
         self.detect_infinite_logging_loop(lines)
         self.detect_world_writable_files(lines)
+        self.detect_delayed_self_destruct(lines)
+        self.detect_background_lock_monitoring(lines)
+        self.detect_caching_abuse_patterns(lines)
+        self.detect_silent_failures(lines)
+        self.detect_pid_masking_logic(lines)
 
 
         return self.issues
@@ -233,6 +238,137 @@ class ScriptParser:
                     "code": line.strip(),
                     "description": "World-writable file permissions detected — security risk."
                 })
+
+    def detect_delayed_self_destruct(self, lines):
+        """
+        Detect logic that delays execution of destructive actions like rm -rf
+        until after conditional checks, especially from retrieved/cached values.
+        """
+        cache_used = False
+        suspicious_trigger = False
+        rm_detected = False
+        cache_line = 0
+        rm_line = 0
+
+        for idx, line in enumerate(lines):
+            if "retrieve_cached_data" in line or "cat" in line and "cache" in line:
+                cache_used = True
+                cache_line = idx + 1
+
+            if re.search(r'(>|>>)\s*/dev/null', line) and "ping" in line:
+                self.issues.append({
+                    "severity": "Low",
+                    "type": "silent_failure",
+                    "line_number": idx + 1,
+                    "code": line.strip(),
+                    "description": "Silent network check (output fully suppressed) — may obscure critical failures."
+                })
+
+            if re.search(r'if.*\|.*grep.*[><=!]', line) or "if" in line and "retrieve_cached_data" in line:
+                suspicious_trigger = True
+
+            if "rm -rf" in line and "/" in line and "--no-preserve-root" in line:
+                rm_detected = True
+                rm_line = idx + 1
+
+        if cache_used and suspicious_trigger and rm_detected:
+            self.issues.append({
+                "severity": "Critical",
+                "type": "delayed_self_destruct",
+                "line_number": rm_line,
+                "code": lines[rm_line - 1].strip(),
+                "description": f"Delayed self-destruct logic detected: `rm -rf` triggered by cached or delayed condition (see cache near line {cache_line})"
+            })
+
+
+    def detect_background_lock_monitoring(self, lines):
+        """
+        Detect background lock monitoring loops that periodically check for a 'locked' state.
+        """
+        for idx, line in enumerate(lines):
+            if "is_system_locked" in line and "log_message" in lines[idx + 1] and "&" in lines[-1]:
+                self.issues.append({
+                    "severity": "Medium",
+                    "type": "background_lock_monitor",
+                    "line_number": idx + 1,
+                    "code": line.strip(),
+                    "description": "System lock state is being monitored in the background — could be part of hidden control logic."
+                })
+
+    def detect_caching_abuse_patterns(self, lines):
+        """
+        Detect caching patterns where benign-looking cache functions could hide or re-use dangerous output.
+        """
+        cache_writes = set()
+        cache_reads = set()
+
+        for idx, line in enumerate(lines):
+            if "cache_data" in line and "(" not in line:  
+                cache_writes.add(idx)
+            if "retrieve_cached_data" in line:
+                cache_reads.add(idx)
+
+        for idx in cache_reads:
+            if any(abs(idx - widx) > 5 for widx in cache_writes):  
+                self.issues.append({
+                    "severity": "High",
+                    "type": "abuse_of_cache",
+                    "line_number": idx + 1,
+                    "code": lines[idx].strip(),
+                    "description": "Cached data retrieved far from where it was stored — possible logic obfuscation or delayed execution vector."
+                })
+
+    def detect_silent_failures(self, lines):
+        """
+        Detect commands where output is fully suppressed, possibly masking failures (e.g., ping, curl, wget, systemctl).
+        """
+        suppressors = ["ping", "curl", "wget", "systemctl", "apt-get", "yum", "dnf"]
+        for idx, line in enumerate(lines):
+            if any(cmd in line for cmd in suppressors) and ">/dev/null" in line and "2>/dev/null" in line:
+                self.issues.append({
+                    "severity": "Medium",
+                    "type": "silent_failure",
+                    "line_number": idx + 1,
+                    "code": line.strip(),
+                    "description": "Command output and error fully suppressed — failures may go undetected."
+                })
+
+    def detect_pid_masking_logic(self, lines):
+        """
+        Detect logic where PID files are checked and script exits early,
+        potentially preventing proper execution or masking stale state.
+        """
+        found_pid_check = False
+        found_early_exit = False
+        pid_var = ""
+
+        for idx, line in enumerate(lines):
+            # Capture the PID file variable
+            if re.search(r'PID_FILE="?[^"]+"?', line):
+                match = re.search(r'PID_FILE="?([^"]+)"?', line)
+                if match:
+                    pid_var = match.group(1)
+
+            # Look for PID check logic
+            if "kill -0" in line and "$(" in line and "cat" in line and ".pid" in line:
+                found_pid_check = True
+                pid_line = idx + 1
+
+            if found_pid_check and ("exit" in line or "return" in line):
+                found_early_exit = True
+                self.issues.append({
+                    "severity": "Warning",
+                    "type": "pid_check_masking",
+                    "line_number": idx + 1,
+                    "code": line.strip(),
+                    "description": f"Script exits early if PID exists — may block execution or mask stale PID issues (check near line {pid_line})"
+                })
+                found_pid_check = False  # Reset to avoid duplicate triggers
+
+
+
+
+
 
 
 

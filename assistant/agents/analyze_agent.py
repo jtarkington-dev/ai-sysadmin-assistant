@@ -23,25 +23,26 @@ class AnalyzeAgent(Agent):
 
         # ---- OPTIONAL: GPT Explanation ----
         if use_gpt:
-            gpt_explanations = []
+            combined_prompt = (
+                "You are a security auditing assistant. Explain why each of these Bash lines might be risky.\n"
+                "Format your response as:\n"
+                "Line <line_number>: <explanation>\n\n"
+            )
+
             for issue in issues:
-                prompt = (
-                    f"Explain why this Bash line might be risky:\n\n"
-                    f"{issue['code']}\n\n"
+                combined_prompt += (
+                    f"Line {issue['line_number']}:\n"
+                    f"{issue['code']}\n"
                     f"Context: {issue['description']}\n\n"
-                    f"Provide a short but detailed security explanation."
                 )
-                explanation = ask_gpt(prompt)
-                if explanation:
-                    gpt_explanations.append(f"Explanation for Line {issue['line_number']}:\n{explanation}")
-                else:
-                    gpt_explanations.append(f"Explanation for Line {issue['line_number']}:\n(No response from AI)")
 
-            report += "\n\n## AI Explanations\n" + "\n\n".join(gpt_explanations)
+            print("[INFO] Sending batched GPT request for all lines...")
+            explanation_response = ask_gpt(combined_prompt)
 
-        # ---- Script Predicted Behavior ----
-        predicted_behavior = self.summarize_behavior(target)
-        report += f"\n\n## Predicted Behavior\n{predicted_behavior}"
+            if explanation_response:
+                report += "\n\n## AI Explanations\n" + explanation_response
+            else:
+                report += "\n\n## AI Explanations\n(No response from AI)"
 
         return report
 
@@ -58,4 +59,9 @@ class AnalyzeAgent(Agent):
             f"{content}"
         )
         behavior_summary = ask_gpt(prompt)
-        return behavior_summary if behavior_summary else "(No behavior summary generated.)"
+        if not behavior_summary:
+            print("[ERROR] GPT returned no summary.", file=sys.stderr)
+            return "(No behavior summary returned.)"
+        return behavior_summary
+
+
